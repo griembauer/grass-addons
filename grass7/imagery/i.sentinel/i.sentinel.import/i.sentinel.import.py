@@ -163,11 +163,9 @@ from grass.exceptions import CalledModuleError
 
 class SentinelImporter(object):
     def __init__(self, input_dir, unzip_dir):
-        # list of directories to cleanup
+        # list of directories & maps to cleanup
         self._dir_list = []
-
-        # dictionary of map products to cleanup
-        self._map_list = {}
+        self._map_list = []
 
         # check if input dir exists
         self.input_dir = input_dir
@@ -184,11 +182,10 @@ class SentinelImporter(object):
 
     def __del__(self):
         # remove temporary maps
-        for key, value in self._map_list:
-            if gs.find_file(value, element = 'cell', mapset = mapset)['file']:
-                gs.run_command("g.remove", flags="f", type='raster',
-                 name=",".join([self._map_list[m] for m in self._map_list.keys()]),
-                 quiet=True)
+        for map in self._map_list:
+            if gs.find_file(map, element='cell')['file']:
+                gs.run_command("g.remove", flags="f", type='raster', name=map,
+                               quiet=True)
 
 
         if flags["l"]:
@@ -282,25 +279,25 @@ class SentinelImporter(object):
         return files
 
     def import_products(self, reproject=False, link=False, override=False):
-        args = {}
+        self._args = {}
         if link:
             module = "r.external"
-            args["flags"] = "o" if override else None
+            self._args["flags"] = "o" if override else None
         else:
-            args["memory"] = options["memory"]
+            self._args["memory"] = options["memory"]
             if reproject:
                 module = "r.import"
-                args["resample"] = "bilinear"
-                args["resolution"] = "value"
-                args["extent"] = options["extent"]
+                self._args["resample"] = "bilinear"
+                self._args["resolution"] = "value"
+                self._args["extent"] = options["extent"]
             else:
                 module = "r.in.gdal"
-                args["flags"] = "o" if override else None
+                self._args["flags"] = "o" if override else None
                 if options["extent"] == "region":
-                    if args["flags"]:
-                        args["flags"] += "r"
+                    if self._args["flags"]:
+                        self._args["flags"] += "r"
                     else:
-                        args["flags"] = "r"
+                        self._args["flags"] = "r"
 
         for f in self.files:
             if not override and (link or (not link and not reproject)):
@@ -312,7 +309,7 @@ class SentinelImporter(object):
                         )
                     )
 
-            self._import_file(f, module, args)
+            self._import_file(f, module, self._args)
 
     def _check_projection(self, filename):
         try:
@@ -361,9 +358,9 @@ class SentinelImporter(object):
         mapname = self._map_name(filename)
         gs.message(_("Processing <{}>...").format(mapname))
         if module == "r.import":
-            args["resolution_value"] = self._raster_resolution(filename)
+            self._args["resolution_value"] = self._raster_resolution(filename)
         try:
-            gs.run_command(module, input=filename, output=mapname, **args)
+            gs.run_command(module, input=filename, output=mapname, **self._args)
             if gs.raster_info(mapname)["datatype"] in ("FCELL", "DCELL"):
                 gs.message("Rounding to integer after reprojection")
                 gs.use_temp_region()
@@ -381,33 +378,78 @@ class SentinelImporter(object):
                 )
                 gs.del_temp_region()
             gs.raster_history(mapname)
-        except CalledModuleError as e:
+        except CalledModuleError:
             pass  # error already printed
 
-    def import_cloud_masks(self, override):
+    def import_cloud_masks(self, area_threshold, prob_threshold, output, shadows, reproject):
         files = self._filter("MSK_CLDPRB_20m.jp2")
 
         for f in files:
+            safe_dir = os.path.dirname(f).split(os.path.sep)[-4]
+            items = safe_dir.split("_")
 
+            # Define temporary maps to be removed later on
+            clouds_imported = "_".join([items[5], items[2], "cloudprob"])
+            clouds_selected = "_".join([items[5], items[2], "clouds_selected"])
+            mask_selected = "_".join([items[5], items[2], "mask_selected"])
+            shadows_imported = "_".join([items[5], items[2], "shadows"])
+            shadows_selected = "_".join([items[5], items[2], "shadows_selected"])
 
+            self._map_list.extend([clouds_imported, clouds_selected])
 
             try:
-                gs.run_command(
-                    "v.import",
-                    input=f,
-                    flags="o" if override else None,  # same SRS as data
-                    output=map_name,
-                    quiet=True,
-                )
-                gs.vector_history(map_name)
+                if reproject:
+                    self._args["resolution_value"] = self._raster_resolution(f)
+                    gs.run_command("r.import",
+                        input=f,
+                        output=clouds_imported,
+                        **self._args)
+                else:
+                    gs.run_command("r.in.gdal",
+                        input=f,
+                        output=clouds_imported,
+                        **self._args)
+
+                gs.use_temp_region()
+                gs.run_command("g.region", raster=clouds_imported)
+                gs.mapcalc(f'{clouds_selected} = if({clouds_imported} > {prob_threshold}/100, 1, 0)')
+
+                if shadows == 'yes':
+                    try:
+                        shadow_file = self._filter("_".join([items[5], items[2], "SCL_20m.jp2"]))
+                        if reproject:
+                            gs.run_command("r.import",
+                                input=shadow_file,
+                                output=shadows_imported,
+                                **self._args)
+                        else:
+                            gs.run_command("r.in.gdal",
+                                input=shadow_file,
+                                output=shadows_imported,
+                                **self._args)
+
+                        gs.mapcalc(f'{shadows_selected} = if({shadows_imported} == 3, 2, 0)')
+                        gs.mapcalc(f'{mask_selected} = max({shadows_selected},{clouds_selected})')
+                    except:
+                        pass
+
+                else:
+                    gs.run_command("g.rename", quiet=True,
+                                   raster=(clouds_selected, mask_selected))
+
+
+                gs.run_command('r.reclass.area', input=tmp["cloud_raster_reclass"], output=tmp["cloud_raster_cleaned"], value=options['minimum_threshold'], mode='greater')
+
+
+
             except:
                 pass
 
 
 
-            # safe_dir = os.path.dirname(f).split(os.path.sep)[-4]
-            # items = safe_dir.split("_")
+            gs.del_temp_region()
             # map_name = "_".join([items[5], items[2], "MSK", "CLOUDS"])
+            # import raster for shadow mask
 
 
 
@@ -670,8 +712,7 @@ def main():
           options["cloud_probability_threshold"],
           options["cloud_output"],
           options["cloud_shadows"],
-          options["extent"],
-          flags["o"])
+          flags["r"])
 
     if options["register_output"]:
         # create t.register file if requested
