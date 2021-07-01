@@ -166,6 +166,9 @@ class SentinelImporter(object):
         # list of directories to cleanup
         self._dir_list = []
 
+        # dictionary of map products to cleanup
+        self._map_list = {}
+
         # check if input dir exists
         self.input_dir = input_dir
         if not os.path.exists(input_dir):
@@ -180,6 +183,14 @@ class SentinelImporter(object):
             gs.fatal(_("Directory <{}> does not exist").format(unzip_dir))
 
     def __del__(self):
+        # remove temporary maps
+        for key, value in self._map_list:
+            if gs.find_file(value, element = 'cell', mapset = mapset)['file']:
+                gs.run_command("g.remove", flags="f", type='raster',
+                 name=",".join([self._map_list[m] for m in self._map_list.keys()]),
+                 quiet=True)
+
+
         if flags["l"]:
             # unzipped files are required when linking
             return
@@ -374,21 +385,12 @@ class SentinelImporter(object):
             pass  # error already printed
 
     def import_cloud_masks(self, override):
-        from osgeo import ogr
-
         files = self._filter("MSK_CLDPRB_20m.jp2")
 
         for f in files:
-            safe_dir = os.path.dirname(f).split(os.path.sep)[-4]
-            items = safe_dir.split("_")
-            map_name = "_".join([items[5], items[2], "MSK", "CLOUDS"])
-            # check if any OGR layer
-            dsn = ogr.Open(f)
-            layer_count = dsn.GetLayerCount()
-            dsn.Destroy()
-            if layer_count < 1:
-                gs.info("No clouds layer found in <{}>. Import skipped".format(f))
-                continue
+
+
+
             try:
                 gs.run_command(
                     "v.import",
@@ -398,9 +400,14 @@ class SentinelImporter(object):
                     quiet=True,
                 )
                 gs.vector_history(map_name)
-            except CalledModuleError as e:
-                pass  # error already printed
+            except:
+                pass
 
+
+
+            # safe_dir = os.path.dirname(f).split(os.path.sep)[-4]
+            # items = safe_dir.split("_")
+            # map_name = "_".join([items[5], items[2], "MSK", "CLOUDS"])
 
 
 
@@ -659,7 +666,12 @@ def main():
 
     if flags["c"]:
         # import cloud mask if requested
-        importer.import_cloud_masks(flags["o"])
+        importer.import_cloud_masks(options["cloud_area_threshold"],
+          options["cloud_probability_threshold"],
+          options["cloud_output"],
+          options["cloud_shadows"],
+          options["extent"],
+          flags["o"])
 
     if options["register_output"]:
         # create t.register file if requested
