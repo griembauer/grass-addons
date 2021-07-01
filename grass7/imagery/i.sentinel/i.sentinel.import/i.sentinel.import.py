@@ -71,6 +71,41 @@
 #% description: Name of directory into which Sentinel metadata json dumps are saved
 #% required: no
 #%end
+
+#%option
+#% key: cloud_area_threshold
+#% description: Threshold above which areas of clouds and/or cloud shadows will be masked (in hectares)
+#% type: integer
+#% required: no
+#% answer: 1
+#%end
+#%option
+#% key: cloud_probability_threshold
+#% description: Minimum cloud probability for pixels to be masked
+#% type: integer
+#% required: no
+#% options: 0-100
+#% answer: 65
+#%end
+#%option
+#% key: cloud_output
+#% type: string
+#% required: no
+#% multiple: no
+#% options: vector,raster
+#% answer: vector
+#% label: Create cloud mask as raster or vector product
+#%end
+#%option
+#% key: cloud_shadows
+#% type: string
+#% required: no
+#% multiple: no
+#% options: yes, no
+#% answer: yes
+#% label: Include cloud shadows in cloud masking
+#%end
+
 #%flag
 #% key: r
 #% description: Reproject raster data using r.import if needed
@@ -88,7 +123,7 @@
 #%end
 #%flag
 #% key: c
-#% description: Import cloud masks as vector maps
+#% description: Import cloud and/or cloud shadows masks
 #% guisection: Settings
 #%end
 #%flag
@@ -112,6 +147,7 @@
 #% exclusive: extent,-l
 #% exclusive: metadata,-j
 #%end
+
 import os
 import sys
 import re
@@ -340,7 +376,7 @@ class SentinelImporter(object):
     def import_cloud_masks(self, override):
         from osgeo import ogr
 
-        files = self._filter("MSK_CLOUDS_B00.gml")
+        files = self._filter("MSK_CLDPRB_20m.jp2")
 
         for f in files:
             safe_dir = os.path.dirname(f).split(os.path.sep)[-4]
@@ -364,6 +400,10 @@ class SentinelImporter(object):
                 gs.vector_history(map_name)
             except CalledModuleError as e:
                 pass  # error already printed
+
+
+
+
 
     def print_products(self):
         for f in self.files:
