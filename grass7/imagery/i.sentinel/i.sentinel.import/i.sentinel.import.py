@@ -185,7 +185,6 @@ class SentinelImporter(object):
                 gs.run_command("g.remove", flags="fb", type='raster', name=map,
                                quiet=True)
 
-
         if flags["l"]:
             # unzipped files are required when linking
             return
@@ -463,10 +462,10 @@ class SentinelImporter(object):
                 # Create final cloud (and shadow) mask & display areal statistics
                 if output == 'vector':
                     gs.run_command('r.to.vect', input=mask_selected, output=map_name, type='area', flags='s')
-                    gs.run_command('v.db.addcolumn', map=map_name, columns='GRASSRGB varchar(20)')
-                    gs.run_command('v.db.update', map=map_name, column='GRASSRGB', where='label=="clouds"', value='230:230:230')
-                    gs.run_command('v.db.update', map=map_name, column='GRASSRGB', where='label=="shadows"', value='60:60:60')
-                    gs.run_command('v.colors', map=map_name, use='attr', column='value', rgb_column='GRASSRGB', flags='c')
+                    gs.run_command('v.db.addcolumn', map=map_name, columns='GRASSRGB varchar(20)', quiet=True)
+                    gs.run_command('v.db.update', map=map_name, column='GRASSRGB', where='label=="clouds"', value='230:230:230', quiet=True)
+                    gs.run_command('v.db.update', map=map_name, column='GRASSRGB', where='label=="shadows"', value='60:60:60', quiet=True)
+                    gs.run_command('v.colors', map=map_name, use='attr', column='value', rgb_column='GRASSRGB', flags='c', quiet=True)
                     gs.vector_history(map_name)
 
                 else:
@@ -740,10 +739,10 @@ def main():
     if flags["c"]:
         # import cloud mask if requested
         importer.import_cloud_masks(options["cloud_area_threshold"],
-          options["cloud_probability_threshold"],
-          options["cloud_output"],
-          options["cloud_shadows"],
-          flags["r"])
+                                    options["cloud_probability_threshold"],
+                                    options["cloud_output"],
+                                    options["cloud_shadows"],
+                                    flags["r"])
 
     if options["register_output"]:
         # create t.register file if requested
